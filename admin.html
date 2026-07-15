@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <title>作答紀錄管理後台</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif; background: #f0f4f2; color: #333; margin: 0; padding: 1rem; }
+    h1 { color: #2f6f4e; font-size: 1.3rem; margin-bottom: 0.25rem; }
+    .subtitle { color: #777; font-size: 0.9rem; margin-bottom: 1.5rem; }
+    .stats { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    .stat-card { background: #fff; border-radius: 8px; padding: 0.75rem 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); min-width: 140px; }
+    .stat-card .label { font-size: 0.8rem; color: #888; }
+    .stat-card .value { font-size: 1.6rem; font-weight: 700; color: #2f6f4e; }
+    .question-stats { background: #fff; border-radius: 8px; padding: 1rem 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 1.5rem; }
+    .question-stats h2 { margin-top: 0; font-size: 1rem; color: #2f6f4e; }
+    .q-row { display: flex; align-items: center; gap: 0.75rem; margin: 0.4rem 0; font-size: 0.9rem; }
+    .q-label { width: 60px; color: #555; }
+    .bar-bg { flex: 1; background: #e8f0eb; border-radius: 4px; height: 16px; }
+    .bar-fill { background: #2f6f4e; border-radius: 4px; height: 16px; transition: width 0.4s; }
+    .q-pct { width: 40px; text-align: right; font-weight: 600; }
+    .records { background: #fff; border-radius: 8px; padding: 1rem 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow-x: auto; }
+    .records h2 { margin-top: 0; font-size: 1rem; color: #2f6f4e; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th { background: #e8f0eb; color: #2f6f4e; padding: 0.4rem 0.6rem; text-align: center; }
+    td { padding: 0.4rem 0.6rem; text-align: center; border-bottom: 1px solid #f0f0f0; }
+    tr:last-child td { border-bottom: none; }
+    .correct { color: #2f6f4e; font-weight: 600; }
+    .incorrect { color: #c0392b; }
+    #loading { color: #888; margin: 2rem 0; }
+    .toolbar { margin-bottom: 1rem; }
+    button { background: #2f6f4e; color: #fff; border: none; border-radius: 16px; padding: 0.4rem 1rem; font-size: 0.85rem; cursor: pointer; }
+    button:hover { background: #275b40; }
+  </style>
+</head>
+<body>
+  <h1>📊 作答紀錄管理後台</h1>
+  <p class="subtitle">只有你能看到這個頁面（不要把連結分享給參加者）</p>
+  <p id="loading">載入中…</p>
+  <div id="dashboard" style="display:none">
+    <div class="stats">
+      <div class="stat-card"><div class="label">作答人數</div><div class="value" id="stat-count">0</div></div>
+      <div class="stat-card"><div class="label">平均分數</div><div class="value" id="stat-avg">–</div></div>
+      <div class="stat-card"><div class="label">滿分人數</div><div class="value" id="stat-perfect">0</div></div>
+    </div>
+    <div class="question-stats">
+      <h2>每題答對率</h2>
+      <div id="q-bars"></div>
+    </div>
+    <div class="records">
+      <h2>個別作答明細</h2>
+      <div class="toolbar"><button id="btn-csv">匯出 CSV</button></div>
+      <table id="records-table">
+        <thead>
+          <tr>
+            <th>#</th><th>時間</th><th>得分</th>
+            <th>第1題</th><th>第2題</th><th>第3題</th><th>第4題</th>
+            <th>第5題</th><th>第6題</th><th>第7題</th><th>第8題</th>
+          </tr>
+        </thead>
+        <tbody id="records-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getFirestore, collection, getDocs, orderBy, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey:            "AIzaSyAFq4v03ZS9SPmxyxGutxkgD-2fvWwEmro",
+      authDomain:        "test-bc5a0.firebaseapp.com",
+      projectId:         "test-bc5a0",
+      storageBucket:     "test-bc5a0.firebasestorage.app",
+      messagingSenderId: "1052139596262",
+      appId:             "1:1052139596262:web:487285f7cdf0612d9cce27"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db  = getFirestore(app);
+    const correctAnswers = { q1:"B", q2:"B", q3:"B", q4:"B", q5:"B", q6:"C", q7:"B", q8:"B" };
+    const questions = ["q1","q2","q3","q4","q5","q6","q7","q8"];
+
+    const q    = query(collection(db, "quiz_results"), orderBy("timestamp", "desc"));
+    const snap = await getDocs(q);
+    const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('dashboard').style.display = 'block';
+
+    if (records.length === 0) {
+      document.getElementById('dashboard').innerHTML = '<p style="color:#888">目前還沒有人作答。</p>';
+      return;
+    }
+
+    const total   = records.length;
+    const avgScore = (records.reduce((s, r) => s + (r.score || 0), 0) / total).toFixed(1);
+    const perfect  = records.filter(r => r.score === 8).length;
+    document.getElementById('stat-count').textContent   = total;
+    document.getElementById('stat-avg').textContent     = `${avgScore}/8`;
+    document.getElementById('stat-perfect').textContent = perfect;
+
+    const barsEl = document.getElementById('q-bars');
+    questions.forEach((q, i) => {
+      const cnt = records.filter(r => r.answers && r.answers[q] === correctAnswers[q]).length;
+      const pct = Math.round((cnt / total) * 100);
+      barsEl.innerHTML += `<div class="q-row"><span class="q-label">第 ${i+1} 題</span><div class="bar-bg"><div class="bar-fill" style="width:${pct}%"></div></div><span class="q-pct">${pct}%</span></div>`;
+    });
+
+    const tbody = document.getElementById('records-body');
+    records.forEach((r, idx) => {
+      const time  = r.timestamp?.toDate ? r.timestamp.toDate().toLocaleString('zh-TW') : '–';
+      const cells = questions.map(q => {
+        const ans = r.answers?.[q] || '–';
+        const ok  = ans === correctAnswers[q];
+        return `<td class="${ok ? 'correct' : 'incorrect'}">${ans}${ok ? ' ✓' : ' ✗'}</td>`;
+      }).join('');
+      tbody.innerHTML += `<tr><td>${total - idx}</td><td>${time}</td><td><strong>${r.score ?? '–'} / 8</strong></td>${cells}</tr>`;
+    });
+
+    document.getElementById('btn-csv').addEventListener('click', () => {
+      const header = ['編號','時間','得分',...questions.map((_,i)=>`第${i+1}題`)].join(',');
+      const rows   = records.map((r, idx) => {
+        const time = r.timestamp?.toDate ? r.timestamp.toDate().toLocaleString('zh-TW') : '';
+        return `${total-idx},"${time}",${r.score ?? ''},${questions.map(q => r.answers?.[q] || '').join(',')}`;
+      });
+      const blob = new Blob(['\uFEFF' + [header,...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'quiz_results.csv' });
+      a.click();
+    });
+  </script>
+</body>
+</html>
