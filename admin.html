@@ -51,7 +51,7 @@
     <div class="records">
       <h2>個別作答明細</h2>
       <div class="toolbar"><button id="btn-csv">匯出 CSV</button></div>
-      <table id="records-table">
+      <table>
         <thead>
           <tr>
             <th>#</th><th>時間</th><th>得分</th>
@@ -77,57 +77,65 @@
       appId:             "1:1052139596262:web:487285f7cdf0612d9cce27"
     };
 
-    const app = initializeApp(firebaseConfig);
-    const db  = getFirestore(app);
     const correctAnswers = { q1:"B", q2:"B", q3:"B", q4:"B", q5:"B", q6:"C", q7:"B", q8:"B" };
     const questions = ["q1","q2","q3","q4","q5","q6","q7","q8"];
 
-    const q    = query(collection(db, "quiz_results"), orderBy("timestamp", "desc"));
-    const snap = await getDocs(q);
-    const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    async function loadRecords() {
+      const app = initializeApp(firebaseConfig);
+      const db  = getFirestore(app);
 
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('dashboard').style.display = 'block';
+      const q       = query(collection(db, "quiz_results"), orderBy("timestamp", "desc"));
+      const snap    = await getDocs(q);
+      const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-    if (records.length === 0) {
-      document.getElementById('dashboard').innerHTML = '<p style="color:#888">目前還沒有人作答。</p>';
-      return;
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('dashboard').style.display = 'block';
+
+      if (records.length === 0) {
+        document.getElementById('dashboard').innerHTML = '<p style="color:#888">目前還沒有人作答。</p>';
+        return;
+      }
+
+      const total    = records.length;
+      const avgScore = (records.reduce((s, r) => s + (r.score || 0), 0) / total).toFixed(1);
+      const perfect  = records.filter(r => r.score === 8).length;
+
+      document.getElementById('stat-count').textContent   = total;
+      document.getElementById('stat-avg').textContent     = `${avgScore}/8`;
+      document.getElementById('stat-perfect').textContent = perfect;
+
+      const barsEl = document.getElementById('q-bars');
+      questions.forEach((q, i) => {
+        const cnt = records.filter(r => r.answers && r.answers[q] === correctAnswers[q]).length;
+        const pct = Math.round((cnt / total) * 100);
+        barsEl.innerHTML += `<div class="q-row"><span class="q-label">第 ${i+1} 題</span><div class="bar-bg"><div class="bar-fill" style="width:${pct}%"></div></div><span class="q-pct">${pct}%</span></div>`;
+      });
+
+      const tbody = document.getElementById('records-body');
+      records.forEach((r, idx) => {
+        const time  = r.timestamp?.toDate ? r.timestamp.toDate().toLocaleString('zh-TW') : '–';
+        const cells = questions.map(q => {
+          const ans = r.answers?.[q] || '–';
+          const ok  = ans === correctAnswers[q];
+          return `<td class="${ok ? 'correct' : 'incorrect'}">${ans}${ok ? ' ✓' : ' ✗'}</td>`;
+        }).join('');
+        tbody.innerHTML += `<tr><td>${total - idx}</td><td>${time}</td><td><strong>${r.score ?? '–'} / 8</strong></td>${cells}</tr>`;
+      });
+
+      document.getElementById('btn-csv').addEventListener('click', () => {
+        const header = ['編號','時間','得分',...questions.map((_,i)=>`第${i+1}題`)].join(',');
+        const rows   = records.map((r, idx) => {
+          const time = r.timestamp?.toDate ? r.timestamp.toDate().toLocaleString('zh-TW') : '';
+          return `${total-idx},"${time}",${r.score ?? ''},${questions.map(q => r.answers?.[q] || '').join(',')}`;
+        });
+        const blob = new Blob(['\uFEFF' + [header,...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'quiz_results.csv' });
+        a.click();
+      });
     }
 
-    const total   = records.length;
-    const avgScore = (records.reduce((s, r) => s + (r.score || 0), 0) / total).toFixed(1);
-    const perfect  = records.filter(r => r.score === 8).length;
-    document.getElementById('stat-count').textContent   = total;
-    document.getElementById('stat-avg').textContent     = `${avgScore}/8`;
-    document.getElementById('stat-perfect').textContent = perfect;
-
-    const barsEl = document.getElementById('q-bars');
-    questions.forEach((q, i) => {
-      const cnt = records.filter(r => r.answers && r.answers[q] === correctAnswers[q]).length;
-      const pct = Math.round((cnt / total) * 100);
-      barsEl.innerHTML += `<div class="q-row"><span class="q-label">第 ${i+1} 題</span><div class="bar-bg"><div class="bar-fill" style="width:${pct}%"></div></div><span class="q-pct">${pct}%</span></div>`;
-    });
-
-    const tbody = document.getElementById('records-body');
-    records.forEach((r, idx) => {
-      const time  = r.timestamp?.toDate ? r.timestamp.toDate().toLocaleString('zh-TW') : '–';
-      const cells = questions.map(q => {
-        const ans = r.answers?.[q] || '–';
-        const ok  = ans === correctAnswers[q];
-        return `<td class="${ok ? 'correct' : 'incorrect'}">${ans}${ok ? ' ✓' : ' ✗'}</td>`;
-      }).join('');
-      tbody.innerHTML += `<tr><td>${total - idx}</td><td>${time}</td><td><strong>${r.score ?? '–'} / 8</strong></td>${cells}</tr>`;
-    });
-
-    document.getElementById('btn-csv').addEventListener('click', () => {
-      const header = ['編號','時間','得分',...questions.map((_,i)=>`第${i+1}題`)].join(',');
-      const rows   = records.map((r, idx) => {
-        const time = r.timestamp?.toDate ? r.timestamp.toDate().toLocaleString('zh-TW') : '';
-        return `${total-idx},"${time}",${r.score ?? ''},${questions.map(q => r.answers?.[q] || '').join(',')}`;
-      });
-      const blob = new Blob(['\uFEFF' + [header,...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
-      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'quiz_results.csv' });
-      a.click();
+    loadRecords().catch(err => {
+      document.getElementById('loading').textContent = '載入失敗：' + err.message;
     });
   </script>
 </body>
